@@ -4,8 +4,8 @@
             "name": "Win32",
             "includePath": [
                 "${workspaceFolder}/**",
-                "${IDF_PATH}/components/**"
-                
+                "${IDF_PATH}/components/**",
+                "D:/Pot_sensation/Firmware/esp-idf/components/freertos/include"
             ],
             "defines": [
                 "_DEBUG",
