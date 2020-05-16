@@ -1,4 +1,5 @@
 cmake_minimum_required(VERSION 3.5)
+
 project(idf_as_lib C)
 
 if("${TARGET}" STREQUAL "esp32")

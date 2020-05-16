@@ -24,6 +24,7 @@
 #include "nimble/ble.h"
 #include "host/ble_uuid.h"
 #include "ble_hs_priv.h"
+#include "esp_nimble_mem.h"
 
 /**
  * ATT server - Attribute Protocol
@@ -171,7 +172,8 @@ ble_att_svr_find_by_handle(uint16_t handle_id)
 /**
  * Find a host attribute by UUID.
  *
- * @param uuid                  The ble_uuid_t to search for
+ * @param uuid                  The ble_uuid_t to search for; null means
+ *                                  find any type of attribute.
  * @param prev                  On input: Indicates the starting point of the
  *                                  walk; null means start at the beginning of
  *                                  the list, non-null means start at the
@@ -198,7 +200,7 @@ ble_att_svr_find_by_uuid(struct ble_att_svr_entry *prev, const ble_uuid_t *uuid,
          entry != NULL && entry->ha_handle_id <= end_handle;
          entry = STAILQ_NEXT(entry, ha_next)) {
 
-        if (ble_uuid_cmp(entry->ha_uuid, uuid) == 0) {
+        if (uuid == NULL || ble_uuid_cmp(entry->ha_uuid, uuid) == 0) {
             return entry;
         }
     }
@@ -2721,7 +2723,7 @@ ble_att_svr_reset(void)
 static void
 ble_att_svr_free_start_mem(void)
 {
-    free(ble_att_svr_entry_mem);
+    nimble_platform_mem_free(ble_att_svr_entry_mem);
     ble_att_svr_entry_mem = NULL;
 }
 
@@ -2733,7 +2735,7 @@ ble_att_svr_start(void)
     ble_att_svr_free_start_mem();
 
     if (ble_hs_max_attrs > 0) {
-        ble_att_svr_entry_mem = malloc(
+        ble_att_svr_entry_mem = nimble_platform_mem_malloc(
             OS_MEMPOOL_BYTES(ble_hs_max_attrs,
                              sizeof (struct ble_att_svr_entry)));
         if (ble_att_svr_entry_mem == NULL) {

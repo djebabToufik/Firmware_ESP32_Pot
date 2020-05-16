@@ -47,6 +47,8 @@
 #include "nimble/nimble_opt.h"
 #include "host/ble_sm.h"
 #include "ble_hs_priv.h"
+#include "ble_hs_resolv_priv.h"
+#include "../store/config/src/ble_store_config_priv.h"
 
 #if NIMBLE_BLE_SM
 
@@ -545,6 +547,29 @@ ble_sm_persist_keys(struct ble_sm_proc *proc)
             }
 
             identity_ev = 1;
+#if MYNEWT_VAL(BLE_HOST_BASED_PRIVACY)
+            if (ble_host_rpa_enabled())
+            {
+                struct ble_hs_dev_records *p_dev_rec =
+                                          ble_rpa_find_peer_dev_rec(conn->bhc_peer_rpa_addr.val);
+                if (p_dev_rec == NULL) {
+                    if (!ble_rpa_resolv_add_peer_rec(conn->bhc_peer_rpa_addr.val)) {
+                        p_dev_rec = ble_rpa_find_peer_dev_rec(conn->bhc_peer_rpa_addr.val);
+                    }
+                }
+
+                if (p_dev_rec != NULL) {
+                    /* Once bonded, copy the peer device records */
+                    swap_buf(p_dev_rec->peer_sec.irk, proc->peer_keys.irk, 16);
+                    p_dev_rec->peer_sec.irk_present = proc->peer_keys.irk_valid;
+                    memcpy(p_dev_rec->peer_sec.peer_addr.val,
+                           proc->peer_keys.addr, 6);
+                    p_dev_rec->peer_sec.peer_addr.type = proc->peer_keys.addr_type;
+
+                    ble_store_persist_peer_records();
+                }
+            }
+#endif
         }
     } else {
         peer_addr = conn->bhc_peer_addr;
@@ -1723,6 +1748,21 @@ err:
     }
 }
 
+static bool
+ble_sm_verify_auth_requirements(uint8_t authreq)
+{
+    /* For now we check only SC only mode. I.e.: when remote indicates
+     * to not support SC pairing, let us make sure legacy pairing is supported
+     * on our side. If not, we can fail right away.
+     */
+    if (!(authreq & BLE_SM_PAIR_AUTHREQ_SC)) {
+        if (MYNEWT_VAL(BLE_SM_LEGACY) == 0) {
+            return false;
+        }
+    }
+    return true;
+}
+
 static void
 ble_sm_pair_req_rx(uint16_t conn_handle, struct os_mbuf **om,
                    struct ble_sm_result *res)
@@ -1795,6 +1835,9 @@ ble_sm_pair_req_rx(uint16_t conn_handle, struct os_mbuf **om,
         } else if (req->max_enc_key_size > BLE_SM_PAIR_KEY_SZ_MAX) {
             res->sm_err = BLE_SM_ERR_INVAL;
             res->app_status = BLE_HS_SM_US_ERR(BLE_SM_ERR_INVAL);
+        } else if (!ble_sm_verify_auth_requirements(req->authreq)) {
+            res->sm_err = BLE_SM_ERR_AUTHREQ;
+            res->app_status = BLE_HS_SM_US_ERR(BLE_SM_ERR_AUTHREQ);
         } else {
             /* The request looks good.  Precalculate our pairing response and
              * determine some properties of the imminent link.  We need this
@@ -1961,9 +2004,7 @@ ble_sm_sec_req_rx(uint16_t conn_handle, struct os_mbuf **om,
              * requested minimum authreq.
              */
             authreq_mitm = cmd->authreq & BLE_SM_PAIR_AUTHREQ_MITM;
-            if ((!authreq_mitm && value_sec.authenticated) ||
-                (authreq_mitm && !value_sec.authenticated)) {
-
+            if (authreq_mitm && !value_sec.authenticated) {
                 res->app_status = BLE_HS_EREJECT;
             }
         }
@@ -2039,6 +2080,7 @@ ble_sm_key_exch_exec(struct ble_sm_proc *proc, struct ble_sm_result *res,
 
         /* store LTK before sending since ble_sm_tx consumes tx mbuf */
         memcpy(proc->our_keys.ltk, enc_info->ltk, 16);
+        proc->our_keys.key_size = proc->key_size;
         proc->our_keys.ltk_valid = 1;
 
         rc = ble_sm_tx(proc->conn_handle, txom);
@@ -2109,6 +2151,19 @@ ble_sm_key_exch_exec(struct ble_sm_proc *proc, struct ble_sm_result *res,
         conn = ble_hs_conn_find_assert(proc->conn_handle);
         ble_hs_conn_addrs(conn, &addrs);
 
+#if MYNEWT_VAL(BLE_HOST_BASED_PRIVACY)
+        /* Check if the privacy is enabled, change the address accordingly
+         * Overriding the addrs field to get the ID address remain unique
+         * (public address) */
+        if (ble_host_rpa_enabled())
+        {
+            uint8_t *local_id_rpa = NULL;
+
+            ble_hs_id_addr(BLE_ADDR_PUBLIC, (void *) &local_id_rpa, NULL);
+            memcpy(addrs.our_id_addr.val, local_id_rpa, 6);
+            addrs.our_id_addr.type = BLE_ADDR_PUBLIC;
+        }
+#endif
         addr_info->addr_type = addrs.our_id_addr.type;
         memcpy(addr_info->bd_addr, addrs.our_id_addr.val, 6);
 
@@ -2204,6 +2259,7 @@ ble_sm_enc_info_rx(uint16_t conn_handle, struct os_mbuf **om,
         proc->rx_key_flags &= ~BLE_SM_KE_F_ENC_INFO;
         proc->peer_keys.ltk_valid = 1;
         memcpy(proc->peer_keys.ltk, cmd->ltk, 16);
+        proc->peer_keys.key_size = proc->key_size;
 
         ble_sm_key_rxed(proc, res);
     }

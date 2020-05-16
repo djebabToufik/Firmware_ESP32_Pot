@@ -10,7 +10,7 @@
 #include "esp_partition.h"
 #include "esp_log.h"
 
-static const char *TAG = "example";
+
 
 void app_main(void)
 {

@@ -63,6 +63,7 @@
 #include "esp_wifi_types.h"
 #include "esp_event.h"
 #include "esp_private/esp_wifi_private.h"
+#include "esp_wifi_default.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -110,6 +111,7 @@ typedef struct {
     int                    wifi_task_core_id;      /**< WiFi Task Core ID */
     int                    beacon_max_len;         /**< WiFi softAP maximum length of the beacon */
     int                    mgmt_sbuf_num;          /**< WiFi management short buffer number, the minimum value is 6, the maximum value is 32 */
+    uint64_t               feature_caps;           /**< Enables additional WiFi features and capabilities */
     int                    magic;                  /**< WiFi init magic number, it should be the last field */
 } wifi_init_config_t;
 
@@ -156,6 +158,7 @@ typedef struct {
 #endif
 
 extern const wpa_crypto_funcs_t g_wifi_default_wpa_crypto_funcs;
+extern uint64_t g_wifi_feature_caps;
 
 #define WIFI_INIT_CONFIG_MAGIC    0x1F2F3F4F
 
@@ -189,8 +192,10 @@ extern const wpa_crypto_funcs_t g_wifi_default_wpa_crypto_funcs;
 #define WIFI_MGMT_SBUF_NUM 32
 #endif
 
+#define CONFIG_FEATURE_WPA3_SAE_BIT     (1<<0)
+
 #define WIFI_INIT_CONFIG_DEFAULT() { \
-    .event_handler = &esp_event_send, \
+    .event_handler = &esp_event_send_internal, \
     .osi_funcs = &g_wifi_osi_funcs, \
     .wpa_crypto_funcs = g_wifi_default_wpa_crypto_funcs, \
     .static_rx_buf_num = CONFIG_ESP32_WIFI_STATIC_RX_BUFFER_NUM,\
@@ -208,6 +213,7 @@ extern const wpa_crypto_funcs_t g_wifi_default_wpa_crypto_funcs;
     .wifi_task_core_id = WIFI_TASK_CORE_ID,\
     .beacon_max_len = WIFI_SOFTAP_BEACON_MAX_LEN, \
     .mgmt_sbuf_num = WIFI_MGMT_SBUF_NUM, \
+    .feature_caps = g_wifi_feature_caps, \
     .magic = WIFI_INIT_CONFIG_MAGIC\
 };
 
@@ -330,7 +336,7 @@ esp_err_t esp_wifi_restore(void);
   * @return 
   *    - ESP_OK: succeed
   *    - ESP_ERR_WIFI_NOT_INIT: WiFi is not initialized by esp_wifi_init
-  *    - ESP_ERR_WIFI_NOT_START: WiFi is not started by esp_wifi_start
+  *    - ESP_ERR_WIFI_NOT_STARTED: WiFi is not started by esp_wifi_start
   *    - ESP_ERR_WIFI_CONN: WiFi internal error, station or soft-AP control block wrong
   *    - ESP_ERR_WIFI_SSID: SSID of AP which station connects is invalid
   */
@@ -542,8 +548,10 @@ esp_err_t esp_wifi_get_bandwidth(wifi_interface_t ifx, wifi_bandwidth_t *bw);
 /**
   * @brief     Set primary/secondary channel of ESP32
   *
-  * @attention 1. This is a special API for sniffer
-  * @attention 2. This API should be called after esp_wifi_start() and esp_wifi_set_promiscuous()
+  * @attention 1. This API should be called after esp_wifi_start()
+  * @attention 2. When ESP32 is in STA mode, this API should not be called when STA is scanning or connecting to an external AP
+  * @attention 3. When ESP32 is in softAP mode, this API should not be called when softAP has connected to external STAs
+  * @attention 4. When ESP32 is in STA+softAP mode, this API should not be called when in the scenarios described above  
   *
   * @param     primary  for HT20, primary is the channel number, for HT40, primary is the primary channel
   * @param     second   for HT20, second is ignored, for HT40, second is the second channel
@@ -584,9 +592,11 @@ esp_err_t esp_wifi_get_channel(uint8_t *primary, wifi_second_chan_t *second);
   * @attention 3. When the country policy is WIFI_COUNTRY_POLICY_MANUAL, always use the configured country info.
   * @attention 4. When the country info is changed because of configuration or because the station connects to a different
   *               external AP, the country IE in probe response/beacon of the soft-AP is changed also.
-  * @attention 5. The country configuration is not stored into flash
+  * @attention 5. The country configuration is stored into flash.
   * @attention 6. This API doesn't validate the per-country rules, it's up to the user to fill in all fields according to 
   *               local regulations.
+  * @attention 7. When this API is called, the PHY init data will switch to the PHY init data type corresponding to the
+  *               country info.
   *
   * @param     country   the configured country info
   *
@@ -798,6 +808,21 @@ esp_err_t esp_wifi_get_config(wifi_interface_t interface, wifi_config_t *conf);
   */
 esp_err_t esp_wifi_ap_get_sta_list(wifi_sta_list_t *sta);
 
+/**
+  * @brief     Get AID of STA connected with soft-AP
+  *
+  * @param     mac  STA's mac address
+  * @param[out]  aid  Store the AID corresponding to STA mac
+  *
+  * @return
+  *    - ESP_OK: succeed
+  *    - ESP_ERR_WIFI_NOT_INIT: WiFi is not initialized by esp_wifi_init
+  *    - ESP_ERR_INVALID_ARG: invalid argument
+  *    - ESP_ERR_NOT_FOUND: Requested resource not found
+  *    - ESP_ERR_WIFI_MODE: WiFi mode is wrong
+  *    - ESP_ERR_WIFI_CONN: WiFi internal error, the station/soft-AP control block is invalid
+  */
+esp_err_t esp_wifi_ap_get_sta_aid(const uint8_t mac[6], uint16_t *aid);
 
 /**
   * @brief     Set the WiFi API configuration storage type

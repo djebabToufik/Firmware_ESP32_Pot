@@ -64,7 +64,7 @@ typedef struct {
 
 static inline bool dm9051_lock(emac_dm9051_t *emac)
 {
-    return xSemaphoreTake(emac->spi_lock, DM9051_SPI_LOCK_TIMEOUT_MS) == pdTRUE;
+    return xSemaphoreTake(emac->spi_lock, pdMS_TO_TICKS(DM9051_SPI_LOCK_TIMEOUT_MS)) == pdTRUE;
 }
 
 static inline bool dm9051_unlock(emac_dm9051_t *emac)
@@ -397,8 +397,10 @@ static void emac_dm9051_task(void *arg)
         if (status & ISR_PR) {
             do {
                 length = ETH_MAX_PACKET_SIZE;
-                buffer = (uint8_t *)heap_caps_malloc(length, MALLOC_CAP_DMA);
-                if (emac->parent.receive(&emac->parent, buffer, &length) == ESP_OK) {
+                buffer = heap_caps_malloc(length, MALLOC_CAP_DMA);
+                if (!buffer) {
+                    ESP_LOGE(TAG, "no mem for receive buffer");
+                } else if (emac->parent.receive(&emac->parent, buffer, &length) == ESP_OK) {
                     /* pass the buffer to stack (e.g. TCP/IP layer) */
                     if (length) {
                         emac->eth->stack_input(emac->eth, buffer, length);
@@ -541,9 +543,11 @@ static esp_err_t emac_dm9051_set_speed(esp_eth_mac_t *mac, eth_speed_t speed)
     switch (speed) {
     case ETH_SPEED_10M:
         MAC_CHECK(nsr & NSR_SPEED, "phy speed is not at 10Mbps", err, ESP_ERR_INVALID_STATE);
+        ESP_LOGD(TAG, "working in 10Mbps");
         break;
     case ETH_SPEED_100M:
         MAC_CHECK(!(nsr & NSR_SPEED), "phy speed is not at 100Mbps", err, ESP_ERR_INVALID_STATE);
+        ESP_LOGD(TAG, "working in 100Mbps");
         break;
     default:
         MAC_CHECK(false, "unknown speed", err, ESP_ERR_INVALID_ARG);
@@ -562,9 +566,11 @@ static esp_err_t emac_dm9051_set_duplex(esp_eth_mac_t *mac, eth_duplex_t duplex)
     MAC_CHECK(dm9051_register_read(emac, DM9051_NCR, &ncr) == ESP_OK, "read NCR failed", err, ESP_FAIL);
     switch (duplex) {
     case ETH_DUPLEX_HALF:
+        ESP_LOGD(TAG, "working in half duplex");
         MAC_CHECK(!(ncr & NCR_FDX), "phy is not at half duplex", err, ESP_ERR_INVALID_STATE);
         break;
     case ETH_DUPLEX_FULL:
+        ESP_LOGD(TAG, "working in full duplex");
         MAC_CHECK(ncr & NCR_FDX, "phy is not at full duplex", err, ESP_ERR_INVALID_STATE);
         break;
     default:
@@ -597,8 +603,6 @@ static esp_err_t emac_dm9051_transmit(esp_eth_mac_t *mac, uint8_t *buf, uint32_t
 {
     esp_err_t ret = ESP_OK;
     emac_dm9051_t *emac = __containerof(mac, emac_dm9051_t, parent);
-    MAC_CHECK(buf, "can't set buf to null", err, ESP_ERR_INVALID_ARG);
-    MAC_CHECK(length, "buf length can't be zero", err, ESP_ERR_INVALID_ARG);
     /* Check if last transmit complete */
     uint8_t tcr = 0;
     MAC_CHECK(dm9051_register_read(emac, DM9051_TCR, &tcr) == ESP_OK, "read TCR failed", err, ESP_FAIL);
@@ -620,7 +624,6 @@ static esp_err_t emac_dm9051_receive(esp_eth_mac_t *mac, uint8_t *buf, uint32_t 
 {
     esp_err_t ret = ESP_OK;
     emac_dm9051_t *emac = __containerof(mac, emac_dm9051_t, parent);
-    MAC_CHECK(buf && length, "can't set buf and length to null", err, ESP_ERR_INVALID_ARG);
     uint8_t rxbyte = 0;
     uint16_t rx_len = 0;
     __attribute__((aligned(4))) dm9051_rx_header_t header; // SPI driver needs the rx buffer 4 byte align

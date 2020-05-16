@@ -6,7 +6,7 @@
     "config_defaults":    "",
     "app_elf":            "app-template.elf",
     "app_bin":            "app-template.bin",
-    "git_revision":       "v4.2-dev-1415-ga2263571b-dirty",
+    "git_revision":       "v4.2-dev-1415-ga2263571b",
     "target":             "esp32",
     "phy_data_partition": "",
     "monitor_baud" :      "115200",

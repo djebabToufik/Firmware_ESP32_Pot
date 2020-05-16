@@ -258,7 +258,7 @@ TEST_CASE("Page validates blob size", "[nvs]")
     Page page;
     TEST_ESP_OK(page.load(0));
 
-    char buf[2048] = { 0 };
+    char buf[4096] = { 0 };
     // There are two potential errors here:
     // - not enough space in the page (because one value has been written already)
     // - value is too long
@@ -527,6 +527,35 @@ TEST_CASE("can modify an item on a page which will be erased", "[nvs]")
     }
 }
 
+TEST_CASE("erase operations are distributed among sectors", "[nvs]")
+{
+    const size_t sectors = 6;
+    SpiFlashEmulator emu(sectors);
+    Storage storage;
+    CHECK(storage.init(0, sectors) == ESP_OK);
+    
+    /* Fill some part of storage with static values */
+    const size_t static_sectors = 2;
+    for (size_t i = 0; i < static_sectors * Page::ENTRY_COUNT; ++i) {
+        char name[Item::MAX_KEY_LENGTH];
+        snprintf(name, sizeof(name), "static%d", (int) i);
+        REQUIRE(storage.writeItem(1, name, i) == ESP_OK);
+    }
+
+    /* Now perform many write operations */
+    const size_t write_ops = 2000;
+    for (size_t i = 0; i < write_ops; ++i) {
+        REQUIRE(storage.writeItem(1, "value", i) == ESP_OK);
+    }
+
+    /* Check that erase counts are distributed between the remaining sectors */
+    const size_t max_erase_cnt = write_ops / Page::ENTRY_COUNT / (sectors - static_sectors) + 1;
+    for (size_t i = 0; i < sectors; ++i) {
+        auto erase_cnt = emu.getSectorEraseCount(i);
+        INFO("Sector " << i << " erased " << erase_cnt);
+        CHECK(erase_cnt <= max_erase_cnt);
+    }
+}
 
 TEST_CASE("can erase items", "[nvs]")
 {
@@ -547,6 +576,72 @@ TEST_CASE("can erase items", "[nvs]")
     CHECK(storage.eraseNamespace(3) == ESP_OK);
     CHECK(storage.readItem(2, "foo", val) == ESP_ERR_NVS_NOT_FOUND);
     CHECK(storage.readItem(3, "key00222", val) == ESP_ERR_NVS_NOT_FOUND);
+}
+
+TEST_CASE("partition name is deep copy", "[nvs]")
+{
+    SpiFlashEmulator emu(10);
+    char partition_name[16];
+    strcpy(partition_name, "const_name");
+
+    nvs_handle_t handle_1;
+    nvs_handle_t handle_2;
+    const uint32_t NVS_FLASH_SECTOR = 6;
+    const uint32_t NVS_FLASH_SECTOR_COUNT_MIN = 3;
+    emu.setBounds(NVS_FLASH_SECTOR, NVS_FLASH_SECTOR + NVS_FLASH_SECTOR_COUNT_MIN);
+
+    TEST_ESP_OK(nvs_flash_init_custom(partition_name, NVS_FLASH_SECTOR, NVS_FLASH_SECTOR_COUNT_MIN));
+
+    strcpy(partition_name, "just_kidding");
+
+    TEST_ESP_OK(nvs_open_from_partition("const_name", "test", NVS_READWRITE, &handle_1));
+    CHECK(nvs_open_from_partition("just_kidding", "test", NVS_READWRITE, &handle_2) == ESP_ERR_NVS_PART_NOT_FOUND);
+
+    nvs_close(handle_1);
+    nvs_close(handle_2);
+
+    nvs_flash_deinit_partition("const_name");
+    nvs_flash_deinit_partition("just_kidding"); // just in case, try not to affect other tests
+}
+
+TEST_CASE("namespace name is deep copy", "[nvs]")
+{
+    SpiFlashEmulator emu(10);
+    char ns_name[16];
+    strcpy(ns_name, "const_name");
+
+    nvs_handle_t handle_1;
+    nvs_handle_t handle_2;
+    const uint32_t NVS_FLASH_SECTOR = 6;
+    const uint32_t NVS_FLASH_SECTOR_COUNT_MIN = 3;
+    emu.setBounds(NVS_FLASH_SECTOR, NVS_FLASH_SECTOR + NVS_FLASH_SECTOR_COUNT_MIN);
+
+    TEST_ESP_OK(nvs_flash_init_custom(NVS_DEFAULT_PART_NAME, NVS_FLASH_SECTOR, NVS_FLASH_SECTOR_COUNT_MIN));
+
+    TEST_ESP_OK(nvs_open("const_name", NVS_READWRITE, &handle_1));
+    strcpy(ns_name, "just_kidding");
+
+    CHECK(nvs_open("just_kidding", NVS_READONLY, &handle_2) == ESP_ERR_NVS_NOT_FOUND);
+
+    nvs_close(handle_1);
+    nvs_close(handle_2);
+
+    nvs_flash_deinit_partition(NVS_DEFAULT_PART_NAME);
+}
+
+TEST_CASE("Partition name no longer than 16 characters", "[nvs]")
+{
+    SpiFlashEmulator emu(10);
+    const char *TOO_LONG_NAME = "0123456789abcdefg";
+
+    const uint32_t NVS_FLASH_SECTOR = 6;
+    const uint32_t NVS_FLASH_SECTOR_COUNT_MIN = 3;
+    emu.setBounds(NVS_FLASH_SECTOR, NVS_FLASH_SECTOR + NVS_FLASH_SECTOR_COUNT_MIN);
+
+    CHECK(nvs_flash_init_custom(TOO_LONG_NAME, NVS_FLASH_SECTOR, NVS_FLASH_SECTOR_COUNT_MIN)
+            == ESP_ERR_INVALID_ARG);
+
+    nvs_flash_deinit_partition(TOO_LONG_NAME); // just in case
 }
 
 TEST_CASE("readonly handle fails on writing", "[nvs]")

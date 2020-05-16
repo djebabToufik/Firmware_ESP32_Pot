@@ -17,14 +17,19 @@
 #include "hal/spi_types.h"
 #include "esp_flash.h"
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 /// Configurations for the SPI Flash to init
 typedef struct {
     spi_host_device_t host_id;      ///< Bus to use
-    int cs_id;                      ///< CS pin (signal) to use
     int cs_io_num;                  ///< GPIO pin to output the CS signal
-    esp_flash_io_mode_t io_mode;  ///< IO mode to read from the Flash
+    esp_flash_io_mode_t io_mode;    ///< IO mode to read from the Flash
     esp_flash_speed_t speed;        ///< Speed of the Flash clock
     int input_delay_ns;             ///< Input delay of the data pins, in ns. Set to 0 if unknown.
+
+    int cs_id;                      ///< @deprecated CS pin (signal) to use
 } esp_flash_spi_device_config_t;
 
 /**
@@ -53,3 +58,6 @@ esp_err_t spi_bus_add_flash_device(esp_flash_t **out_chip, const esp_flash_spi_d
  */
 esp_err_t spi_bus_remove_flash_device(esp_flash_t *chip);
 
+#ifdef __cplusplus
+}
+#endif
