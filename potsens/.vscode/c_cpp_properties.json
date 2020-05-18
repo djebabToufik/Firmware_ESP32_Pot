@@ -1,0 +1,24 @@
+{
+    "configurations": [
+        {
+            "name": "Win32",
+            "includePath": [
+                "${workspaceFolder}/**",
+                "${IDF_PATH}/components/**",
+                "D:/Pot_sensation/Firmware/esp-idf/components/freertos/include",
+                "D:/Pot_sensation/Firmware/potsens/main/include"
+            ],
+            "defines": [
+                "_DEBUG",
+                "UNICODE",
+                "_UNICODE"
+            ],
+            "compilerPath": "C:\\tools\\xtensa-esp32-elf\\esp-2019r2-8.2.0\\xtensa-esp32-elf\\bin\\xtensa-esp32-elf-gcc",
+            "cStandard": "c11",
+            "cppStandard": "gnu++14",
+            "intelliSenseMode": "clang-x86",
+            "compileCommands": "${workspaceFolder}/build/bootloader/compile_commands.json"
+        }
+    ],
+    "version": 4
+}

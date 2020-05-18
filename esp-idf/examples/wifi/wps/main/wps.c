@@ -50,6 +50,7 @@ static esp_wps_config_t config = WPS_CONFIG_INIT_DEFAULT(WPS_MODE);
 static void wifi_event_handler(void* arg, esp_event_base_t event_base,
                                 int32_t event_id, void* event_data)
 {
+    
     switch (event_id) {
         case WIFI_EVENT_STA_START:
             ESP_LOGI(TAG, "WIFI_EVENT_STA_START");

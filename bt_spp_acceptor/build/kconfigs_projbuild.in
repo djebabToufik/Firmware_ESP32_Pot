@@ -1,4 +1,0 @@
-source "D:/Pot_sensation/Firmware/esp-idf/components/app_update/Kconfig.projbuild"
-source "D:/Pot_sensation/Firmware/esp-idf/components/bootloader/Kconfig.projbuild"
-source "D:/Pot_sensation/Firmware/esp-idf/components/esptool_py/Kconfig.projbuild"
-source "D:/Pot_sensation/Firmware/esp-idf/components/partition_table/Kconfig.projbuild"
