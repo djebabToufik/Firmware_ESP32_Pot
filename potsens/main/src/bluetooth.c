@@ -5,6 +5,8 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/event_groups.h"
+#include "esp_log.h"
+#include "esp_event.h"
 
 
 #define SPP_TAG "POT_SENSATION_DEVICE"
@@ -15,7 +17,7 @@
 static const esp_spp_mode_t esp_spp_mode = ESP_SPP_MODE_CB;
 static const esp_spp_sec_t sec_mask = ESP_SPP_SEC_AUTHENTICATE;
 static const esp_spp_role_t role_slave = ESP_SPP_ROLE_SLAVE;
-void esp_bt_gap_cb(esp_bt_gap_cb_event_t event, esp_bt_gap_cb_param_t *param);
+
 
 bool bluetooth_init()
 
@@ -78,9 +80,60 @@ bool bluetooth_init()
     esp_bt_pin_type_t pin_type = ESP_BT_PIN_TYPE_VARIABLE;
     esp_bt_pin_code_t pin_code;
     esp_bt_gap_set_pin(pin_type, 0, pin_code);
-
+   
 return true;    
 }
+void esp_bt_gap_cb(esp_bt_gap_cb_event_t event, esp_bt_gap_cb_param_t *param)
+{
+    switch (event) {
+    case ESP_BT_GAP_AUTH_CMPL_EVT:{
+        if (param->auth_cmpl.stat == ESP_BT_STATUS_SUCCESS) {
+            ESP_LOGI(SPP_TAG, "authentication success: %s", param->auth_cmpl.device_name);
+            esp_log_buffer_hex(SPP_TAG, param->auth_cmpl.bda, ESP_BD_ADDR_LEN);
+        } else {
+            ESP_LOGE(SPP_TAG, "authentication failed, status:%d", param->auth_cmpl.stat);
+        }
+        break;
+    }
+    case ESP_BT_GAP_PIN_REQ_EVT:{
+        ESP_LOGI(SPP_TAG, "ESP_BT_GAP_PIN_REQ_EVT min_16_digit:%d", param->pin_req.min_16_digit);
+        if (param->pin_req.min_16_digit) {
+            ESP_LOGI(SPP_TAG, "Input pin code: 0000 0000 0000 0000");
+            esp_bt_pin_code_t pin_code = {0};
+            esp_bt_gap_pin_reply(param->pin_req.bda, true, 16, pin_code);
+        } else {
+            ESP_LOGI(SPP_TAG, "Input pin code: 1234");
+            esp_bt_pin_code_t pin_code;
+            pin_code[0] = '1';
+            pin_code[1] = '2';
+            pin_code[2] = '3';
+            pin_code[3] = '4';
+            esp_bt_gap_pin_reply(param->pin_req.bda, true, 4, pin_code);
+        }
+        break;
+    }
+
+#if (CONFIG_BT_SSP_ENABLED == true)
+    case ESP_BT_GAP_CFM_REQ_EVT:
+        ESP_LOGI(SPP_TAG, "ESP_BT_GAP_CFM_REQ_EVT Please compare the numeric value: %d", param->cfm_req.num_val);
+        esp_bt_gap_ssp_confirm_reply(param->cfm_req.bda, true);
+        break;
+    case ESP_BT_GAP_KEY_NOTIF_EVT:
+        ESP_LOGI(SPP_TAG, "ESP_BT_GAP_KEY_NOTIF_EVT passkey:%d", param->key_notif.passkey);
+        break;
+    case ESP_BT_GAP_KEY_REQ_EVT:
+        ESP_LOGI(SPP_TAG, "ESP_BT_GAP_KEY_REQ_EVT Please enter passkey!");
+        break;
+#endif
+
+    default: {
+        ESP_LOGI(SPP_TAG, "event: %d", event);
+        break;
+    }
+    }
+    return;
+}
+
 void  bluetooth_handle(esp_spp_cb_param_t *param)
 {
     /*
@@ -97,56 +150,87 @@ void  bluetooth_handle(esp_spp_cb_param_t *param)
                   Tag for registred device     Device_ID,User_ID and threshold 
      */
 
-    const esp_partition_t *partition = esp_partition_find_first(ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_ANY, "storage");
+  /*  const esp_partition_t *partition = esp_partition_find_first(ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_ANY, "storage");
     assert(partition != NULL);
 
     // Read back the data, checking that read data and written data match
     ESP_ERROR_CHECK(esp_partition_read(partition, 0, store_data, sizeof(store_data)));  
-    printf("Read before the switch %s \n",pstore_data);
+    printf("Read before the switch %s \n",pstore_data); */
 
     switch(param->data_ind.data[0])
         {
             case ID_RESET_ALL_DATA:
-                memset(read_data, NON_REGISTRED_DEVICE, sizeof(read_data));
-                ESP_ERROR_CHECK(esp_partition_erase_range(partition, 0, partition->size));
-                ESP_ERROR_CHECK(esp_partition_write(partition, 0, read_data, sizeof(read_data)));
-                ESP_ERROR_CHECK(esp_partition_read(partition, 0, store_data, sizeof(read_data)));  
-                printf("Data deleted vlues are : %s \n",pread_data);
-                *Is_Registred=false;
-                Registred=false;
+                
+                printf(" ID_RESET_ALL_DATA\n");
+               
             break;
 
             case ID_REGISTER_DEVICE:
-            read_data[0]=REGISTRED_DEVICE;
+             printf("ID_REGISTER_DEVICE\n");
                 
-                for(int i=0;i<sizeof(read_data)-1;i++)
-                    {
-                        read_data[i+1]=param->data_ind.data[i];
-                    }
-                
-                printf("it should write %s \n",pread_data);
-                ESP_ERROR_CHECK(esp_partition_erase_range(partition, 0, partition->size));
-                ESP_ERROR_CHECK(esp_partition_write(partition, 0, read_data,sizeof(read_data)));
-                memset(store_data,0xFF,sizeof(store_data));
-                ESP_ERROR_CHECK(esp_partition_read(partition,0, store_data, sizeof(store_data)));  
-                printf("New Registration Sotred values are : %s \n",pstore_data);
-                *Is_Registred=true;
-                Registred=true;
+               
             break;
 
             case ID_SET_NEW_THRESH:
             printf("Case ID_SET_NEW_THRESH TBD \n");
             break;
         }   
-        printf("Received data size %d \n",sizeof(pread_data)/((uint8_t) *pread_data));
+      //  printf("Received data size %d \n",sizeof(pread_data)/((uint8_t) *pread_data));
       
    
-    ESP_ERROR_CHECK(esp_partition_read(partition, 0, store_data, 51));  
-    printf("Stored data After writing are %s \n",pstore_data);
+   // ESP_ERROR_CHECK(esp_partition_read(partition, 0, store_data, 51));  
+    printf("Leave bluetooth handle \n");
   
         
 }
 
+
+void esp_spp_cb(esp_spp_cb_event_t event, esp_spp_cb_param_t *param)
+
+{
+
+   
+    
+    switch (event) {
+    case ESP_SPP_INIT_EVT:
+        ESP_LOGI(SPP_TAG, "ESP_SPP_INIT_EVT");
+        esp_bt_dev_set_device_name(EXAMPLE_DEVICE_NAME);
+        esp_bt_gap_set_scan_mode(ESP_BT_CONNECTABLE, ESP_BT_GENERAL_DISCOVERABLE);
+        esp_spp_start_srv(sec_mask,role_slave, 0, SPP_SERVER_NAME);
+        break;
+    case ESP_SPP_DISCOVERY_COMP_EVT:
+        ESP_LOGI(SPP_TAG, "ESP_SPP_DISCOVERY_COMP_EVT");
+        break;
+    case ESP_SPP_OPEN_EVT:
+        ESP_LOGI(SPP_TAG, "ESP_SPP_OPEN_EVT");
+        break;
+    case ESP_SPP_CLOSE_EVT:
+        ESP_LOGI(SPP_TAG, "ESP_SPP_CLOSE_EVT");
+        break;
+    case ESP_SPP_START_EVT:
+        ESP_LOGI(SPP_TAG, "ESP_SPP_START_EVT");
+        break;
+    case ESP_SPP_CL_INIT_EVT:
+        ESP_LOGI(SPP_TAG, "ESP_SPP_CL_INIT_EVT");
+        break;
+    case ESP_SPP_DATA_IND_EVT:
+      ESP_LOGI(SPP_TAG, "ESP_SPP_DATA_IND_EVT");
+      bluetooth_handle(param);
+
+        break;
+    case ESP_SPP_CONG_EVT:
+        ESP_LOGI(SPP_TAG, "ESP_SPP_CONG_EVT");
+        break;
+    case ESP_SPP_WRITE_EVT:
+        ESP_LOGI(SPP_TAG, "ESP_SPP_WRITE_EVT");
+        break;
+    case ESP_SPP_SRV_OPEN_EVT:
+        ESP_LOGI(SPP_TAG, "ESP_SPP_SRV_OPEN_EVT"); 
+        break;
+    default:
+        break;
+    }
+}
 
 
 
