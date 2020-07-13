@@ -183,8 +183,6 @@ void  bluetooth_handle(esp_spp_cb_param_t *param)
   
         
 }
-
-
 void esp_spp_cb(esp_spp_cb_event_t event, esp_spp_cb_param_t *param)
 
 {
@@ -216,7 +214,7 @@ void esp_spp_cb(esp_spp_cb_event_t event, esp_spp_cb_param_t *param)
     case ESP_SPP_DATA_IND_EVT:
       ESP_LOGI(SPP_TAG, "ESP_SPP_DATA_IND_EVT");
       bluetooth_handle(param);
-
+      esp_spp_write(param,1,param->data_ind.data[0]);
         break;
     case ESP_SPP_CONG_EVT:
         ESP_LOGI(SPP_TAG, "ESP_SPP_CONG_EVT");

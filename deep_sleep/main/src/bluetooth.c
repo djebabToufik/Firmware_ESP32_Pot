@@ -1,15 +1,14 @@
 #include "Bluetooth.h"
 
-int wait=0;
+
 
 bool bluetooth_init()
 
 {
-    printf("bin da");
    
-      ESP_ERROR_CHECK(esp_bt_controller_mem_release(ESP_BT_MODE_BLE));
+    ESP_ERROR_CHECK(esp_bt_controller_mem_release(ESP_BT_MODE_BLE));
     esp_err_t berr;
-    
+    timeout=0;
     
     
     /*Initialize and Enable the Controller*/
@@ -69,8 +68,11 @@ bool bluetooth_init()
     esp_bt_gap_set_pin(pin_type, 0, pin_code);
     printf("waiting 10sec \n");
     vTaskDelay(10000 / portTICK_PERIOD_MS);
-    if(wait>0)
-    vTaskDelay(wait / portTICK_PERIOD_MS);
+    printf("waiting %d sec TIMEOUT \n",timeout);
+    vTaskDelay(timeout / portTICK_PERIOD_MS);
+        
+
+    
 
    
 return true;    
@@ -130,8 +132,8 @@ void esp_bt_gap_cb(esp_bt_gap_cb_event_t event, esp_bt_gap_cb_param_t *param)
 void  bluetooth_handle(esp_spp_cb_param_t *param)
 {
     /*
-    Message Format is Function_ID, Device_id (24 char), User_ID (24 char), Threshold (3char)
-    Example of typical message : 1,5eae9931b0f4b0e109b8b117,Toufik_Djebab,135
+    Message Format is Function_ID, Device_id (24 char), User_ID (24 char), Threshold (4 char)
+    Example of typical message : 1,5eae9931b0f4b0e109b8b117,Toufik_Djebab,1355
     Function_ID: #define Reset_All_Data 42
                  #define Register_Device 43
                  #define Set_New_THRESH 44
@@ -139,64 +141,32 @@ void  bluetooth_handle(esp_spp_cb_param_t *param)
     Other function_IDS might be added
     Values between 40 and 60 are reserved for internal use 
     Internal non-volatile memory is organized as described below:
-    Memory case : 0x00                         0x01-0x52 
+    Memory case : 0x00                         0x01-0x53 
                   Tag for registred device     Device_ID,User_ID and threshold 
      */
 
-  /*  const esp_partition_t *partition = esp_partition_find_first(ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_ANY, "storage");
-    assert(partition != NULL);
-
-    // Read back the data, checking that read data and written data match
-    ESP_ERROR_CHECK(esp_partition_read(partition, 0, store_data, sizeof(store_data)));  
-    printf("Read before the switch %s \n",pstore_data); */
     
-    struct timeval now;
-    struct timeval now2;
-    int timeout=0;
-    gettimeofday(&now, NULL);
+    
 
     switch(param->data_ind.data[0])
         {
-            case ID_RESET_ALL_DATA:
-                while(timeout<60)
-                {
+            case ID_RESET_ALL_DATA: 
+                    wifi_init_sta();
+                    http_delete();              
                     deregisterdevice(param->data_ind.data);
-                    printf(" ID_RESET_ALL_DATA\n");
-                    gettimeofday(&now2, NULL);
-                    timeout=now2.tv_sec - now.tv_sec;
-                    vTaskDelay(1000 / portTICK_PERIOD_MS);
-                }
-                
-               
+                    printf(" ID_RESET_ALL_DATA\n");                             
             break;
 
-            case ID_REGISTER_DEVICE:
-             while(timeout<60)
-                {
+            case ID_REGISTER_DEVICE:            
                     registerdevice(param->data_ind.data);
-                    printf(" ID_REGISTER_DEVICE\n");
-                    gettimeofday(&now2, NULL);
-                    timeout=now2.tv_sec - now.tv_sec;
-                    vTaskDelay(1000 / portTICK_PERIOD_MS);
-                }
-                
-               
+                    printf(" ID_REGISTER_DEVICE\n");                             
             break;
 
             case ID_SET_NEW_THRESH:
-            while(timeout<60)
-                {
+                    registerdevice(param->data_ind.data);
                     printf(" ID_SET_NEW_THRESH\n");
-                    gettimeofday(&now2, NULL);
-                    timeout=now2.tv_sec - now.tv_sec;
-                    vTaskDelay(1000 / portTICK_PERIOD_MS);
-                }
             break;
         }   
-      //  printf("Received data size %d \n",sizeof(pread_data)/((uint8_t) *pread_data));
-      
-   
-   // ESP_ERROR_CHECK(esp_partition_read(partition, 0, store_data, 51));  
     printf("Leave bluetooth handle \n");
   
         
@@ -207,7 +177,7 @@ void esp_spp_cb(esp_spp_cb_event_t event, esp_spp_cb_param_t *param)
 
 {
 
-   
+    printf("BLUETOOTH EVENT\n");
     
     switch (event) {
     case ESP_SPP_INIT_EVT:
@@ -234,7 +204,7 @@ void esp_spp_cb(esp_spp_cb_event_t event, esp_spp_cb_param_t *param)
     case ESP_SPP_DATA_IND_EVT:
       ESP_LOGI(SPP_TAG, "ESP_SPP_DATA_IND_EVT");
       bluetooth_handle(param);
-
+      esp_spp_write(param->srv_open.handle,1,param->data_ind.data);
         break;
     case ESP_SPP_CONG_EVT:
         ESP_LOGI(SPP_TAG, "ESP_SPP_CONG_EVT");
@@ -244,7 +214,8 @@ void esp_spp_cb(esp_spp_cb_event_t event, esp_spp_cb_param_t *param)
         break;
     case ESP_SPP_SRV_OPEN_EVT:
         ESP_LOGI(SPP_TAG, "ESP_SPP_SRV_OPEN_EVT"); 
-        wait=60000;
+        timeout=60000;
+        printf("trigering timeout of %d sec\n",timeout);
         break;
     default:
         break;

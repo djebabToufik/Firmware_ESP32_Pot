@@ -24,6 +24,8 @@
 #include "esp_spp_api.h"
 
 #include "memorymanager.h"
+#include "httpmanager.h"
+#include "wifimanager.h"
 
 
 
@@ -33,14 +35,21 @@
 
 #define NON_REGISTRED_DEVICE 84
 #define REGISTRED_DEVICE 85
+#define SECURITY_PIN 1111
+
+
 #define ID_RESET_ALL_DATA 42
 #define ID_REGISTER_DEVICE 43
 #define ID_SET_NEW_THRESH 44
+#define ID_SET_WIFI_SETIING 45
+#define ID_GET_DATA 46
+
+
+int timeout;
 
 static const esp_spp_mode_t esp_spp_mode = ESP_SPP_MODE_CB;
 static const esp_spp_sec_t sec_mask = ESP_SPP_SEC_AUTHENTICATE;
 static const esp_spp_role_t role_slave = ESP_SPP_ROLE_SLAVE;
-
 
 
 bool bluetooth_init();

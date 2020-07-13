@@ -4,7 +4,9 @@
 #define MEMORY_LENGHT 100
 #define NON_REGISTRED_DEVICE 84
 #define REGISTRED_DEVICE 85
-#define TH_OFFSET 53
+#define TH_OFFSET 54
+#define ID_OFFSET 2
+#define ID_LENGHT 24
 
 #include <stdbool.h>
 #include "assert.h"
@@ -27,6 +29,7 @@ int getthresh();
 bool isregistred();
 int registerdevice(unsigned char read_data[MEMORY_LENGHT]);
 int deregisterdevice(unsigned char read_data[MEMORY_LENGHT]);
+int getdevice_id(char device_id[24]);
 
 
 

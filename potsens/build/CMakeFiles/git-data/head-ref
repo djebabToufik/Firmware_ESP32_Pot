@@ -1,5 +1,1 @@
-0000000000000000000000000000000000000000 1840274a038585545327843e748fce2052a5b5f4 toufik <djebab.toufik@gmail.com> 1589563147 +0200	branch: Created from HEAD
-1840274a038585545327843e748fce2052a5b5f4 b22a715ce6e309d8007b455056207874ad2ffa85 toufik <djebab.toufik@gmail.com> 1589563571 +0200	commit: bluetooth and non volatile memory and Registration verification
-b22a715ce6e309d8007b455056207874ad2ffa85 52e6a6956afefb39fa69cd2c8de1a26746484357 toufik <djebab.toufik@gmail.com> 1589642594 +0200	commit: ADC READ, and REGISTER/UNREGISTRE DEVICE, while (true) loop
-52e6a6956afefb39fa69cd2c8de1a26746484357 2a520a788f85ae4b04f4aff499fe4c38e5776eec toufik <djebab.toufik@gmail.com> 1589643001 +0200	commit: ADC READ, and REGISTER/UNREGISTRE DEVICE, while (true) loop
-2a520a788f85ae4b04f4aff499fe4c38e5776eec 8d83ea2b949fa26b91814c6efc93a5df2f275f37 toufik <djebab.toufik@gmail.com> 1589819511 +0200	commit: code with bluetooth registration wifi and http communication ready for better organisation
+687f86ae645223b51dbc765ff4bfbe52ebbb42ea

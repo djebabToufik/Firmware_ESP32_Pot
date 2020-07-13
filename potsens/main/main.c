@@ -124,6 +124,7 @@ ESP_LOGI(TAG, "ESP_WIFI_MODE_STA");
 wifi_init_sta();
 bluetooth_init();
 vTaskDelay(10000 / portTICK_PERIOD_MS);
+
  char local_response_buffer[200] = {0};
     esp_http_client_config_t config = {
         .url = "http://192.168.1.5:3000/devices",

@@ -186,3 +186,12 @@ int getthresh()
 
     return threshold;
 }
+
+int getdevice_id(char device_id[24])
+    {
+        const esp_partition_t *partition = esp_partition_find_first(ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_ANY, "storage");   
+        assert(partition != NULL);
+        memset(device_id, REGISTRED_DEVICE, MEMORY_LENGHT);
+        esp_partition_read(partition,4, device_id, ID_OFFSET+ID_LENGHT);
+        return 0;   
+    }
