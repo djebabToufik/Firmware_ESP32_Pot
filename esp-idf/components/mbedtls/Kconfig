@@ -13,6 +13,7 @@ menu "mbedTLS"
               behavior in ESP-IDF
             - Custom allocation mode, by overwriting calloc()/free() using
               mbedtls_platform_set_calloc_free() function
+            - Internal IRAM memory wherever applicable else internal DRAM
 
             Recommended mode here is always internal, since that is most preferred
             from security perspective. But if application requirement does not
@@ -31,6 +32,16 @@ menu "mbedTLS"
 
         config MBEDTLS_CUSTOM_MEM_ALLOC
             bool "Custom alloc mode"
+
+        config MBEDTLS_IRAM_8BIT_MEM_ALLOC
+            bool "Internal IRAM"
+            depends on ESP32_IRAM_AS_8BIT_ACCESSIBLE_MEMORY
+            help
+                Allows to use IRAM memory region as 8bit accessible region.
+
+                TLS input and output buffers will be allocated in IRAM section which is 32bit aligned
+                memory. Every unaligned (8bit or 16bit) access will result in an exception
+                and incur penalty of certain clock cycles per unaligned read/write.
 
     endchoice #MBEDTLS_MEM_ALLOC_MODE
 
@@ -116,6 +127,52 @@ menu "mbedTLS"
         default 3 if MBEDTLS_DEBUG_LEVEL_DEBUG
         default 4 if MBEDTLS_DEBUG_LEVEL_VERBOSE
 
+
+    menu "Certificate Bundle"
+
+        config MBEDTLS_CERTIFICATE_BUNDLE
+            bool "Enable trusted root certificate bundle"
+            default y
+            help
+                Enable support for large number of default root certificates
+
+                When enabled this option allows user to store default as well
+                as customer specific root certificates in compressed format rather
+                than storing full certificate. For the root certificates the public key and the subject name
+                will be stored.
+
+        choice MBEDTLS_DEFAULT_CERTIFICATE_BUNDLE
+            bool "Default certificate bundle options"
+            depends on MBEDTLS_CERTIFICATE_BUNDLE
+            default MBEDTLS_CERTIFICATE_BUNDLE_DEFAULT_FULL
+
+            config MBEDTLS_CERTIFICATE_BUNDLE_DEFAULT_FULL
+                bool "Use the full default certificate bundle"
+            config MBEDTLS_CERTIFICATE_BUNDLE_DEFAULT_CMN
+                bool "Use only the most common certificates from the default bundles"
+                help
+                    Use only the most common certificates from the default bundles, reducing the size with 50%,
+                    while still having around 99% coverage.
+            config MBEDTLS_CERTIFICATE_BUNDLE_DEFAULT_NONE
+                bool "Do not use the default certificate bundle"
+        endchoice
+
+        config MBEDTLS_CUSTOM_CERTIFICATE_BUNDLE
+            depends on MBEDTLS_CERTIFICATE_BUNDLE
+            default n
+            bool "Add custom certificates to the default bundle"
+        config MBEDTLS_CUSTOM_CERTIFICATE_BUNDLE_PATH
+            depends on MBEDTLS_CUSTOM_CERTIFICATE_BUNDLE
+            string "Custom certificate bundle path"
+            help
+                Name of the custom certificate directory or file. This path is evaluated
+                relative to the project root directory.
+    endmenu
+
+
+
+
+
     config MBEDTLS_ECP_RESTARTABLE
         bool "Enable mbedTLS ecp restartable"
         default n
@@ -132,15 +189,39 @@ menu "mbedTLS"
     config MBEDTLS_HARDWARE_AES
         bool "Enable hardware AES acceleration"
         default y
+        depends on !SPIRAM_CACHE_WORKAROUND_STRATEGY_DUPLDST
         help
             Enable hardware accelerated AES encryption & decryption.
 
             Note that if the ESP32 CPU is running at 240MHz, hardware AES does not
             offer any speed boost over software AES.
 
+    config MBEDTLS_AES_USE_INTERRUPT
+        bool "Use interrupt for long AES operations"
+        depends on IDF_TARGET_ESP32S2 && MBEDTLS_HARDWARE_AES
+        default y
+        help
+            Use an interrupt to coordinate long AES operations.
+
+            This allows other code to run on the CPU while an AES operation is pending.
+            Otherwise the CPU busy-waits.
+
+    config MBEDTLS_HARDWARE_GCM
+        bool "Enable partially hardware accelerated GCM"
+        depends on IDF_TARGET_ESP32S2 && MBEDTLS_HARDWARE_AES
+        default y
+        help
+            Enable partially hardware accelerated GCM. GHASH calculation is still done
+            in software.
+
+            If MBEDTLS_HARDWARE_GCM is disabled and MBEDTLS_HARDWARE_AES is enabled then
+            mbedTLS will still use the hardware accelerated AES block operation, but
+            on a single block at a time.
+
     config MBEDTLS_HARDWARE_MPI
         bool "Enable hardware MPI (bignum) acceleration"
-        default n
+        default y
+        depends on !SPIRAM_CACHE_WORKAROUND_STRATEGY_DUPLDST
         help
             Enable hardware accelerated multiple precision integer operations.
 
@@ -149,23 +230,14 @@ menu "mbedTLS"
 
             These operations are used by RSA.
 
-    config MBEDTLS_MPI_USE_INTERRUPT
-        bool "Use interrupt for MPI operations"
-        depends on MBEDTLS_HARDWARE_MPI
-        default n
-        help
-            Use an interrupt to coordinate MPI operations.
-
-            This allows other code to run on the CPU while an MPI operation is pending.
-            Otherwise the CPU busy-waits.
-
     config MBEDTLS_HARDWARE_SHA
         bool "Enable hardware SHA acceleration"
         default y
+        depends on !SPIRAM_CACHE_WORKAROUND_STRATEGY_DUPLDST
         help
             Enable hardware accelerated SHA1, SHA256, SHA384 & SHA512 in mbedTLS.
 
-            Due to a hardware limitation, hardware acceleration is only
+            Due to a hardware limitation, on the ESP32 hardware acceleration is only
             guaranteed if SHA digests are calculated one at a time. If more
             than one SHA digest is calculated at the same time, one will
             be calculated fully in hardware and the rest will be calculated
@@ -254,7 +326,7 @@ menu "mbedTLS"
 
         config MBEDTLS_KEY_EXCHANGE_ECDHE_PSK
             bool "Enable ECDHE-PSK based ciphersuite modes"
-            depends on MBEDTLS_PSK_MODES
+            depends on MBEDTLS_PSK_MODES && MBEDTLS_ECDH_C
             default y
             help
                 Enable to support Elliptic-Curve-Diffie-Hellman PSK (pre-shared-key) TLS authentication modes.
@@ -316,6 +388,13 @@ menu "mbedTLS"
             default y
             help
                 Enable to support ciphersuites with prefix TLS-ECDHE-RSA-WITH-
+
+        config MBEDTLS_KEY_EXCHANGE_ECJPAKE
+            bool "Enable ECJPAKE based ciphersuite modes"
+            depends on MBEDTLS_ECJPAKE_C && MBEDTLS_ECP_DP_SECP256R1_ENABLED
+            default n
+            help
+                Enable to support ciphersuites with prefix TLS-ECJPAKE-WITH-
 
     endmenu # TLS key exchange modes
 
@@ -514,6 +593,13 @@ menu "mbedTLS"
         help
             Enable ECDSA. Needed to use ECDSA-xxx TLS ciphersuites.
 
+    config MBEDTLS_ECJPAKE_C
+        bool "Elliptic curve J-PAKE"
+        depends on MBEDTLS_ECP_C
+        default n
+        help
+            Enable ECJPAKE. Needed to use ECJPAKE-xxx TLS ciphersuites.
+
     config MBEDTLS_ECP_DP_SECP192R1_ENABLED
         bool "Enable SECP192R1 curve"
         depends on MBEDTLS_ECP_C
@@ -608,5 +694,36 @@ menu "mbedTLS"
             Disabling this option saves some code size.
 
             # end of Elliptic Curve options
+
+    config MBEDTLS_POLY1305_C
+        bool "Poly1305 MAC algorithm"
+        default n
+        help
+            Enable support for Poly1305 MAC algorithm.
+
+    config MBEDTLS_CHACHA20_C
+        bool "Chacha20 stream cipher"
+        default n
+        help
+            Enable support for Chacha20 stream cipher.
+
+    config MBEDTLS_CHACHAPOLY_C
+        bool "ChaCha20-Poly1305 AEAD algorithm"
+        default n
+        depends on MBEDTLS_CHACHA20_C && MBEDTLS_POLY1305_C
+        help
+            Enable support for ChaCha20-Poly1305 AEAD algorithm
+
+    menuconfig MBEDTLS_SECURITY_RISKS
+        bool "Show configurations with potential security risks"
+        default n
+
+    config MBEDTLS_ALLOW_UNSUPPORTED_CRITICAL_EXT
+        bool "X.509 CRT parsing with unsupported critical extensions"
+        depends on MBEDTLS_SECURITY_RISKS
+        default n
+        help
+            Allow the X.509 certificate parser to load certificates
+            with unsupported critical extensions
 
 endmenu  # mbedTLS

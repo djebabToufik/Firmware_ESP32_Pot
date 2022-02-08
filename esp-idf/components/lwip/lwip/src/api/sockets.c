@@ -465,6 +465,10 @@ tryget_socket_unconn(int fd)
 {
   struct lwip_sock *ret = tryget_socket_unconn_nouse(fd);
   if (ret != NULL) {
+#if ESP_LWIP_LOCK
+    if (ret->conn == NULL)
+      return NULL;
+#endif /* ESP_LWIP_LOCK */
     if (!sock_inc_used(ret)) {
       return NULL;
     }
@@ -608,6 +612,9 @@ free_socket_locked(struct lwip_sock *sock, int is_tcp, struct netconn **conn,
 
   *lastdata = sock->lastdata;
   sock->lastdata.pbuf = NULL;
+#if ESP_LWIP
+  sock->select_waiting = 0;
+#endif /* ESP_LWIP */
   *conn = sock->conn;
   sock->conn = NULL;
   return 1;

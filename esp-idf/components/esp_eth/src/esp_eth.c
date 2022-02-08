@@ -55,8 +55,9 @@ typedef struct {
     eth_duplex_t duplex;
     eth_link_t link;
     atomic_int ref_count;
+    void *priv;
     uint32_t flags;
-    esp_err_t (*stack_input)(esp_eth_handle_t eth_handle, uint8_t *buffer, uint32_t length);
+    esp_err_t (*stack_input)(esp_eth_handle_t eth_handle, uint8_t *buffer, uint32_t length, void *priv);
     esp_err_t (*on_lowlevel_init_done)(esp_eth_handle_t eth_handle);
     esp_err_t (*on_lowlevel_deinit_done)(esp_eth_handle_t eth_handle);
 } esp_eth_driver_t;
@@ -87,10 +88,11 @@ static esp_err_t eth_phy_reg_write(esp_eth_mediator_t *eth, uint32_t phy_addr, u
 static esp_err_t eth_stack_input(esp_eth_mediator_t *eth, uint8_t *buffer, uint32_t length)
 {
     esp_eth_driver_t *eth_driver = __containerof(eth, esp_eth_driver_t, mediator);
-    if (!eth_driver->stack_input) {
-        return tcpip_adapter_eth_input(buffer, length, NULL);
+    if (eth_driver->stack_input) {
+        return eth_driver->stack_input((esp_eth_handle_t)eth_driver, buffer, length, eth_driver->priv);
     } else {
-        return eth_driver->stack_input((esp_eth_handle_t)eth_driver, buffer, length);
+        free(buffer);
+        return ESP_OK;
     }
 }
 
@@ -169,7 +171,8 @@ esp_err_t esp_eth_driver_install(const esp_eth_config_t *config, esp_eth_handle_
     esp_eth_mac_t *mac = config->mac;
     esp_eth_phy_t *phy = config->phy;
     ETH_CHECK(mac && phy, "can't set eth->mac or eth->phy to null", err, ESP_ERR_INVALID_ARG);
-    esp_eth_driver_t *eth_driver = calloc(1, sizeof(esp_eth_driver_t));
+    // eth_driver contains an atomic variable, which should not be put in PSRAM
+    esp_eth_driver_t *eth_driver = heap_caps_calloc(1, sizeof(esp_eth_driver_t), MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
     ETH_CHECK(eth_driver, "request memory for eth_driver failed", err, ESP_ERR_NO_MEM);
     atomic_init(&eth_driver->ref_count, 1);
     eth_driver->mac = mac;
@@ -194,6 +197,13 @@ esp_err_t esp_eth_driver_install(const esp_eth_config_t *config, esp_eth_handle_
                                    eth_driver, eth_check_link_timer_cb);
     ETH_CHECK(eth_driver->check_link_timer, "create eth_link_timer failed", err_create_timer, ESP_FAIL);
     *out_hdl = (esp_eth_handle_t)eth_driver;
+
+    // for backward compatible to 4.0, and will get removed in 5.0
+#if CONFIG_ESP_NETIF_TCPIP_ADAPTER_COMPATIBLE_LAYER
+    extern esp_err_t tcpip_adapter_compat_start_eth(void *eth_driver);
+    tcpip_adapter_compat_start_eth(eth_driver);
+#endif
+
     return ESP_OK;
 err_create_timer:
     phy->deinit(phy);
@@ -271,10 +281,27 @@ err:
     return ret;
 }
 
-esp_err_t esp_eth_transmit(esp_eth_handle_t hdl, uint8_t *buf, uint32_t length)
+esp_err_t esp_eth_update_input_path(
+    esp_eth_handle_t hdl,
+    esp_err_t (*stack_input)(esp_eth_handle_t hdl, uint8_t *buffer, uint32_t length, void *priv),
+    void *priv)
 {
     esp_err_t ret = ESP_OK;
     esp_eth_driver_t *eth_driver = (esp_eth_driver_t *)hdl;
+    ETH_CHECK(eth_driver, "ethernet driver handle can't be null", err, ESP_ERR_INVALID_ARG);
+    eth_driver->priv = priv;
+    eth_driver->stack_input = stack_input;
+    return ESP_OK;
+err:
+    return ret;
+}
+
+esp_err_t esp_eth_transmit(esp_eth_handle_t hdl, void *buf, uint32_t length)
+{
+    esp_err_t ret = ESP_OK;
+    esp_eth_driver_t *eth_driver = (esp_eth_driver_t *)hdl;
+    ETH_CHECK(buf, "can't set buf to null", err, ESP_ERR_INVALID_ARG);
+    ETH_CHECK(length, "buf length can't be zero", err, ESP_ERR_INVALID_ARG);
     ETH_CHECK(eth_driver, "ethernet driver handle can't be null", err, ESP_ERR_INVALID_ARG);
     esp_eth_mac_t *mac = eth_driver->mac;
     return mac->transmit(mac, buf, length);
@@ -286,6 +313,8 @@ esp_err_t esp_eth_receive(esp_eth_handle_t hdl, uint8_t *buf, uint32_t *length)
 {
     esp_err_t ret = ESP_OK;
     esp_eth_driver_t *eth_driver = (esp_eth_driver_t *)hdl;
+    ETH_CHECK(buf && length, "can't set buf and length to null", err, ESP_ERR_INVALID_ARG);
+    ETH_CHECK(*length > 60, "length can't be less than 60", err, ESP_ERR_INVALID_ARG);
     ETH_CHECK(eth_driver, "ethernet driver handle can't be null", err, ESP_ERR_INVALID_ARG);
     esp_eth_mac_t *mac = eth_driver->mac;
     return mac->receive(mac, buf, length);

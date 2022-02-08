@@ -4,6 +4,7 @@ import subprocess
 import logging
 import shutil
 import re
+
 from .common import BuildSystem, BuildItem, BuildError
 
 BUILD_SYSTEM_CMAKE = "cmake"
@@ -13,7 +14,21 @@ IDF_PY = "idf.py"
 # there is no equivalent for the project CMakeLists files. This seems to be the best option...
 CMAKE_PROJECT_LINE = r"include($ENV{IDF_PATH}/tools/cmake/project.cmake)"
 
-SUPPORTED_TARGETS_REGEX = re.compile(r"set\(\s*SUPPORTED_TARGETS\s+([a-z_0-9\- ]+)\s*\)")
+SUPPORTED_TARGETS_REGEX = re.compile(r'Supported [Tt]argets((?:[\s|]+(?:ESP[0-9A-Z\-]+))+)')
+SDKCONFIG_LINE_REGEX = re.compile(r"^([^=]+)=\"?([^\"\n]*)\"?\n*$")
+
+FORMAL_TO_USUAL = {
+    'ESP32': 'esp32',
+    'ESP32-S2': 'esp32s2',
+}
+
+# If these keys are present in sdkconfig.defaults, they will be extracted and passed to CMake
+SDKCONFIG_TEST_OPTS = [
+    "EXCLUDE_COMPONENTS",
+    "TEST_EXCLUDE_COMPONENTS",
+    "TEST_COMPONENTS",
+    "TEST_GROUPS"
+]
 
 
 class CMakeBuildSystem(BuildSystem):
@@ -53,7 +68,7 @@ class CMakeBuildSystem(BuildSystem):
         # Note: the build system supports taking multiple sdkconfig.defaults files via SDKCONFIG_DEFAULTS
         # CMake variable. However here we do this manually to perform environment variable expansion in the
         # sdkconfig files.
-        sdkconfig_defaults_list = ["sdkconfig.defaults"]
+        sdkconfig_defaults_list = ["sdkconfig.defaults", "sdkconfig.defaults." + build_item.target]
         if build_item.sdkconfig_path:
             sdkconfig_defaults_list.append(build_item.sdkconfig_path)
 
@@ -63,6 +78,7 @@ class CMakeBuildSystem(BuildSystem):
             if not build_item.dry_run:
                 os.unlink(sdkconfig_file)
 
+        extra_cmakecache_items = {}
         logging.debug("Creating sdkconfig file: {}".format(sdkconfig_file))
         if not build_item.dry_run:
             with open(sdkconfig_file, "w") as f_out:
@@ -73,13 +89,13 @@ class CMakeBuildSystem(BuildSystem):
                     logging.debug("Appending {} to sdkconfig".format(sdkconfig_name))
                     with open(sdkconfig_path, "r") as f_in:
                         for line in f_in:
+                            if not line.endswith("\n"):
+                                line += "\n"
+                            m = SDKCONFIG_LINE_REGEX.match(line)
+                            if m and m.group(1) in SDKCONFIG_TEST_OPTS:
+                                extra_cmakecache_items[m.group(1)] = m.group(2)
+                                continue
                             f_out.write(os.path.expandvars(line))
-            # Also save the sdkconfig file in the build directory
-            shutil.copyfile(
-                os.path.join(work_path, "sdkconfig"),
-                os.path.join(build_path, "sdkconfig"),
-            )
-
         else:
             for sdkconfig_name in sdkconfig_defaults_list:
                 sdkconfig_path = os.path.join(app_path, sdkconfig_name)
@@ -101,6 +117,11 @@ class CMakeBuildSystem(BuildSystem):
             work_path,
             "-DIDF_TARGET=" + build_item.target,
         ]
+        for key, val in extra_cmakecache_items.items():
+            args.append("-D{}={}".format(key, val))
+        if "TEST_EXCLUDE_COMPONENTS" in extra_cmakecache_items \
+                and "TEST_COMPONENTS" not in extra_cmakecache_items:
+            args.append("-DTESTS_ALL=1")
         if build_item.verbose:
             args.append("-v")
         args.append("build")
@@ -123,6 +144,12 @@ class CMakeBuildSystem(BuildSystem):
             subprocess.check_call(args, stdout=build_stdout, stderr=build_stderr)
         except subprocess.CalledProcessError as e:
             raise BuildError("Build failed with exit code {}".format(e.returncode))
+        else:
+            # Also save the sdkconfig file in the build directory
+            shutil.copyfile(
+                os.path.join(work_path, "sdkconfig"),
+                os.path.join(build_path, "sdkconfig"),
+            )
         finally:
             if log_file:
                 log_file.close()
@@ -136,6 +163,32 @@ class CMakeBuildSystem(BuildSystem):
             return cmakelists_file.read()
 
     @staticmethod
+    def _read_readme(app_path):
+        # Markdown supported targets should be:
+        # e.g. | Supported Targets | ESP32 |
+        #      | ----------------- | ----- |
+        # reStructuredText supported targets should be:
+        # e.g. ================= =====
+        #      Supported Targets ESP32
+        #      ================= =====
+        def get_md_or_rst(app_path):
+            readme_path = os.path.join(app_path, 'README.md')
+            if not os.path.exists(readme_path):
+                readme_path = os.path.join(app_path, 'README.rst')
+                if not os.path.exists(readme_path):
+                    return None
+            return readme_path
+
+        readme_path = get_md_or_rst(app_path)
+        # Handle sub apps situation, e.g. master-slave
+        if not readme_path:
+            readme_path = get_md_or_rst(os.path.dirname(app_path))
+        if not readme_path:
+            return None
+        with open(readme_path, "r") as readme_file:
+            return readme_file.read()
+
+    @staticmethod
     def is_app(path):
         cmakelists_file_content = CMakeBuildSystem._read_cmakelists(path)
         if not cmakelists_file_content:
@@ -146,13 +199,25 @@ class CMakeBuildSystem(BuildSystem):
 
     @staticmethod
     def supported_targets(app_path):
-        cmakelists_file_content = CMakeBuildSystem._read_cmakelists(app_path)
-        if not cmakelists_file_content:
+        readme_file_content = CMakeBuildSystem._read_readme(app_path)
+        if not readme_file_content:
             return None
-        match = re.findall(SUPPORTED_TARGETS_REGEX, cmakelists_file_content)
+        match = re.findall(SUPPORTED_TARGETS_REGEX, readme_file_content)
         if not match:
             return None
         if len(match) > 1:
             raise NotImplementedError("Can't determine the value of SUPPORTED_TARGETS in {}".format(app_path))
-        targets = match[0].split(" ")
+        support_str = match[0].strip()
+
+        targets = []
+        for part in support_str.split('|'):
+            for inner in part.split(' '):
+                inner = inner.strip()
+                if not inner:
+                    continue
+                elif inner in FORMAL_TO_USUAL:
+                    targets.append(FORMAL_TO_USUAL[inner])
+                else:
+                    raise NotImplementedError("Can't recognize value of target {} in {}, now we only support '{}'"
+                                              .format(inner, app_path, ', '.join(FORMAL_TO_USUAL.keys())))
         return targets

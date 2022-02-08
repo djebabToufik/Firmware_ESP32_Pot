@@ -1,34 +1,41 @@
-
 assign_test:
   tags:
     - assign_test
   image: $CI_DOCKER_REGISTRY/ubuntu-test-env$BOT_DOCKER_IMAGE_TAG
   stage: assign_test
   # gitlab ci do not support match job with RegEx or wildcard now in dependencies.
-  # we have a lot build example jobs. now we don't use dependencies, just download all artificats of build stage.
+  # we have a lot build example jobs. now we don't use dependencies, just download all artifacts of build stage.
   dependencies:
-    - build_ssc
-    - build_esp_idf_tests_cmake
+    - build_ssc_esp32
+    - build_esp_idf_tests_cmake_esp32
+    - build_esp_idf_tests_cmake_esp32s2
   variables:
     SUBMODULES_TO_FETCH: "components/esptool_py/esptool"
     EXAMPLE_CONFIG_OUTPUT_PATH: "$CI_PROJECT_DIR/examples/test_configs"
-    UNIT_TEST_CASE_FILE: "${CI_PROJECT_DIR}/components/idf_test/unit_test/TestCaseAll.yml"
+    TEST_APP_CONFIG_OUTPUT_PATH: "$CI_PROJECT_DIR/tools/test_apps/test_configs"
+    UNIT_TEST_CASE_FILE: "${CI_PROJECT_DIR}/components/idf_test/unit_test"
   artifacts:
     paths:
       - components/idf_test/*/CIConfigs
       - components/idf_test/*/TC.sqlite
       - $EXAMPLE_CONFIG_OUTPUT_PATH
+      - $TEST_APP_CONFIG_OUTPUT_PATH
       - build_examples/artifact_index.json
+      - build_test_apps/artifact_index.json
     expire_in: 1 week
   only:
     variables:
       - $BOT_TRIGGER_WITH_LABEL == null
       - $BOT_LABEL_UNIT_TEST
+      - $BOT_LABEL_UNIT_TEST_S2
       - $BOT_LABEL_INTEGRATION_TEST
       - $BOT_LABEL_EXAMPLE_TEST
+      - $BOT_LABEL_CUSTOM_TEST
   script:
     # assign example tests
     - python tools/ci/python_packages/ttfw_idf/CIAssignExampleTest.py $IDF_PATH/examples $CI_TARGET_TEST_CONFIG_FILE $EXAMPLE_CONFIG_OUTPUT_PATH
+    # assign test apps
+    - python tools/ci/python_packages/ttfw_idf/CIAssignExampleTest.py --custom-group test-apps --job-prefix test_app_test_ $IDF_PATH/tools/test_apps $CI_TARGET_TEST_CONFIG_FILE $TEST_APP_CONFIG_OUTPUT_PATH
     # assign unit test cases
     - python tools/ci/python_packages/ttfw_idf/CIAssignUnitTest.py $UNIT_TEST_CASE_FILE $CI_TARGET_TEST_CONFIG_FILE $IDF_PATH/components/idf_test/unit_test/CIConfigs
     # clone test script to assign tests
@@ -48,8 +55,8 @@ update_test_cases:
       - master
       - schedules
   dependencies:
-    - build_esp_idf_tests_make
-    - build_esp_idf_tests_cmake
+    - build_esp_idf_tests_cmake_esp32
+    - build_esp_idf_tests_cmake_esp32s2
   artifacts:
     when: always
     paths:
@@ -57,7 +64,7 @@ update_test_cases:
     expire_in: 1 week
   variables:
     SUBMODULES_TO_FETCH: "components/esptool_py/esptool"
-    UNIT_TEST_CASE_FILE: "${CI_PROJECT_DIR}/components/idf_test/unit_test/TestCaseAll.yml"
+    UNIT_TEST_CASE_DIR: "${CI_PROJECT_DIR}/components/idf_test/unit_test"
     BOT_ACCOUNT_CONFIG_FILE: "${CI_PROJECT_DIR}/test-management/Config/Account.local.yml"
     AUTO_TEST_SCRIPT_PATH: "${CI_PROJECT_DIR}/auto_test_script"
     PYTHON_VER: 3
@@ -68,7 +75,8 @@ update_test_cases:
     - cd test-management
     - echo $BOT_JIRA_ACCOUNT > ${BOT_ACCOUNT_CONFIG_FILE}
     # update unit test cases
-    - python ImportTestCase.py $JIRA_TEST_MANAGEMENT_PROJECT unity -d $UNIT_TEST_CASE_FILE -r $GIT_SHA
+    - export UNIT_TEST_CASE_FILES=$(find $UNIT_TEST_CASE_DIR -maxdepth 1 -name "*.yml" | xargs)
+    - python ImportTestCase.py $JIRA_TEST_MANAGEMENT_PROJECT unity -d $UNIT_TEST_CASE_FILES -r $GIT_SHA
     # update example test cases
     - python ImportTestCase.py $JIRA_TEST_MANAGEMENT_PROJECT tiny_test_fw -d ${CI_PROJECT_DIR}/examples -r $GIT_SHA
     # organize test cases
